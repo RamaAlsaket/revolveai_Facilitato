@@ -10,7 +10,7 @@ import Milestones from './components/Milestones';
 import MindMap from './components/MindMap';
 import ActionPlan from './components/ActionPlan';
 import FeasibilityStudy from './components/FeasibilityStudy';
-import { generateAnalysis, generateMindMap, generateMilestones, generateRefinementQuestions, summarizeIdeaWithAnswers, generateActionPlan, generateFeasibilityStudy } from './services/geminiService';
+import { generateAnalysis, generateMindMap, generateMilestones, generateRefinementQuestions, summarizeIdeaWithAnswers, generateActionPlan, generateFeasibilityStudy } from './services/openaiService';
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>(View.IDEA_INPUT);
