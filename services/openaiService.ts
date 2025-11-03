@@ -1,8 +1,10 @@
 // src/services/openaiService.ts
-// Client-side service that calls our serverless API route /api/openai.
-// IMPORTANT: No process.env here. No @google/genai imports.
+// Converted from the original Gemini service to OpenAI.
+// IMPORTANT: No process.env or @google/genai on the client.
+// All LLM calls go through /api/openai to keep your key on the server.
 
-import type { AnalysisFramework } from '../types';
+import type { GenerateContentResponse } from '@google/genai'; // kept only for type parity; not used
+import { AnalysisFramework } from '../types';
 import type {
   MindMapNode,
   Milestone,
@@ -13,7 +15,7 @@ import type {
 } from '../types';
 import { FRAMEWORKS } from '../constants';
 
-// Helper to call the server route
+// --- Helper: call your serverless route that proxies to OpenAI ---
 async function callOpenAI(prompt: string): Promise<string> {
   const res = await fetch('/api/openai', {
     method: 'POST',
@@ -21,77 +23,107 @@ async function callOpenAI(prompt: string): Promise<string> {
     body: JSON.stringify({ prompt }),
   });
   const data = await res.json();
-  if (!res.ok || (data && data.error)) {
+  if (!res.ok || data?.error) {
     throw new Error(data?.detail || 'OpenAI request failed');
   }
-  return (data.text as string).trim();
+  return (data.text || '').toString().trim();
 }
 
-// 1) generateRefinementQuestions
-export async function generateRefinementQuestions(
+// --- Helper: keep parity with original "getFrameworkDefinition" ---
+const getFrameworkDefinition = (framework: AnalysisFramework) => {
+  const definition = FRAMEWORKS.find(f => f.id === framework);
+  if (!definition) {
+    throw new Error(`Framework definition for ${framework} not found.`);
+  }
+  return definition;
+};
+
+// ------------------------------------------------------------------
+// 1) generateRefinementQuestions (keeps same signature + behavior)
+// ------------------------------------------------------------------
+export const generateRefinementQuestions = async (
   idea: string,
-  onNewQuestion: (q: string) => void
-): Promise<void> {
-  const prompt = `You are an expert business consultant. Given the idea below, output 3–5 highly specific clarifying questions (one per line, no numbering).
+  onNewQuestion: (question: string) => void
+): Promise<void> => {
+  const prompt = `You are an expert business consultant. Given the following business idea, ask 3–5 insightful, highly specific clarifying questions (no numbering, one per line, no extra text).
 
-Idea: "${idea}"`;
-  const out = await callOpenAI(prompt);
-  out
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .forEach(onNewQuestion);
-}
+Business Idea: "${idea}"`;
 
-// 2) summarizeIdeaWithAnswers
-export async function summarizeIdeaWithAnswers(
+  try {
+    // We don't stream from OpenAI here; just split by line like the original buffer logic.
+    const text = await callOpenAI(prompt);
+    text
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .forEach(onNewQuestion);
+  } catch (error) {
+    console.error('Error generating refinement questions:', error);
+    throw new Error('Failed to generate refinement questions.');
+  }
+};
+
+// ------------------------------------------------------------------
+// 2) summarizeIdeaWithAnswers (same output: one paragraph)
+// ------------------------------------------------------------------
+export const summarizeIdeaWithAnswers = async (
   idea: string,
   questions: string[],
   answers: string[]
-): Promise<string> {
+): Promise<string> => {
   const qaPairs = questions
     .map((q, i) => `Q: ${q}\nA: ${answers[i] || 'No answer provided.'}`)
     .join('\n\n');
 
-  const prompt = `Synthesize the refined business idea into one concise paragraph.
+  const prompt = `You are an expert business consultant. You have an original business idea and Q&A clarifications. Synthesize a single concise paragraph as a "Refined Business Idea" (no headings, just the paragraph).
 
 Original Idea: "${idea}"
 
-Q&A:
+Questions and Answers:
 ${qaPairs}
 
-Output: one paragraph only.`;
-  return await callOpenAI(prompt);
-}
+Output: one compelling paragraph, tailored to this idea.`;
 
-// 3) generateAnalysis (expects JSON)
-export async function generateAnalysis(
+  try {
+    const text = await callOpenAI(prompt);
+    return text;
+  } catch (error) {
+    console.error('Error summarizing idea:', error);
+    throw new Error('Failed to summarize idea.');
+  }
+};
+
+// ------------------------------------------------------------------
+// 3) generateAnalysis (returns JSON adhering to framework schema)
+// ------------------------------------------------------------------
+export const generateAnalysis = async (
   idea: string,
   framework: AnalysisFramework
-): Promise<AnalysisData> {
-  const def = FRAMEWORKS.find((f) => f.id === framework);
-  if (!def) throw new Error(\`Framework definition for \${framework} not found.\`);
+): Promise<AnalysisData> => {
+  const frameworkDef = getFrameworkDefinition(framework);
 
-  const prompt = `Conduct a detailed ${def.name} analysis for this idea: "${idea}".
-Return JSON ONLY matching this shape (no extra text, no markdown):
-${JSON.stringify(def.schema, null, 2)}
-Rules:
-- Every point must be specific to this idea.
-- Output pure JSON only.`;
+  const prompt = `You are a world-class business strategist. Conduct a detailed ${frameworkDef.name} analysis for the specific business idea below. Every point must be uniquely tailored to this idea (no generic content).
 
-  const jsonText = await callOpenAI(prompt);
+Business Idea: "${idea}"
+
+Return JSON ONLY that matches this schema (do not include markdown or commentary):
+${JSON.stringify(frameworkDef.schema, null, 2)}`;
+
   try {
+    const jsonText = await callOpenAI(prompt);
     return JSON.parse(jsonText) as AnalysisData;
-  } catch (e) {
-    console.error('parse analysis failed:', jsonText);
-    throw new Error(\`Failed to parse ${def.name} JSON.\`);
+  } catch (error) {
+    console.error(`Error generating ${framework} analysis:`, error);
+    throw new Error(`Failed to generate analysis for ${framework}.`);
   }
-}
+};
 
-// 4) generateMindMap (expects JSON)
-export async function generateMindMap(idea: string): Promise<MindMapNode> {
-  const prompt = `Create a hierarchical mind map for: "${idea}".
-Return JSON ONLY with this shape:
+// ------------------------------------------------------------------
+// 4) generateMindMap (returns JSON MindMapNode like original)
+// ------------------------------------------------------------------
+export const generateMindMap = async (idea: string): Promise<MindMapNode> => {
+  const prompt = `Create a comprehensive, hierarchical mind map for the business idea: "${idea}".
+Return JSON ONLY with this structure (no markdown, no commentary):
 {
   "name": "${idea}",
   "children": [
@@ -103,88 +135,103 @@ Return JSON ONLY with this shape:
     { "name": "Financials", "children": [ ... ] }
   ]
 }
-Rules: 3–4 levels deep; every node specific to this idea; JSON only.`;
-  const jsonText = await callOpenAI(prompt);
+Rules:
+- 3–4 levels deep overall.
+- Every node specific to this idea.
+- The leaf nodes at the deepest level should include a numeric "value" field (e.g., 10).`;
+
   try {
+    const jsonText = await callOpenAI(prompt);
     return JSON.parse(jsonText) as MindMapNode;
-  } catch (e) {
-    console.error('parse mind map failed:', jsonText);
-    throw new Error('Failed to parse mind map JSON.');
+  } catch (error) {
+    console.error('Error generating mind map data:', error);
+    throw new Error('Failed to generate mind map data.');
   }
-}
+};
 
-// 5) generateMilestones (expects JSON array)
-export async function generateMilestones(idea: string): Promise<Milestone[]> {
-  const prompt = `Generate 5–7 sequential milestones for: "${idea}".
-Return JSON array ONLY:
+// ------------------------------------------------------------------
+// 5) generateMilestones (returns JSON array; same schema as original)
+// ------------------------------------------------------------------
+export const generateMilestones = async (idea: string): Promise<Milestone[]> => {
+  const prompt = `Generate a sequence of 5–7 key milestones to develop the business idea: "${idea}".
+Each milestone must be specific to this idea (no generic advice). Provide JSON array ONLY:
 [
-  { "id": 1, "title": "...", "description": "...", "duration": "2 weeks" }
+  { "id": 1, "title": "…", "description": "…", "duration": "2 weeks" }
 ]`;
-  const jsonText = await callOpenAI(prompt);
-  try {
-    return JSON.parse(jsonText) as Milestone[];
-  } catch (e) {
-    console.error('parse milestones failed:', jsonText);
-    throw new Error('Failed to parse milestones JSON.');
-  }
-}
 
-// 6) generateActionPlan (expects JSON array of phases)
-export async function generateActionPlan(idea: string): Promise<ActionPlanData> {
-  const prompt = `Create a phased action plan for: "${idea}".
-Return JSON array ONLY:
+  try {
+    const jsonText = await callOpenAI(prompt);
+    return JSON.parse(jsonText) as Milestone[];
+  } catch (error) {
+    console.error('Error generating milestones:', error);
+    throw new Error('Failed to generate milestones.');
+  }
+};
+
+// ------------------------------------------------------------------
+// 6) generateActionPlan (returns JSON array of phases like original)
+// ------------------------------------------------------------------
+export const generateActionPlan = async (idea: string): Promise<ActionPlanData> => {
+  const prompt = `Generate a detailed, phased action plan to implement the business idea: "${idea}".
+Each phase includes "phase", "description", and "steps" (with "id", "title", "description", "dependencies": [] if any).
+Return JSON array ONLY (no markdown), e.g.:
 [
   {
     "phase": "Phase 1: Research & Validation",
-    "description": "...",
+    "description": "…",
     "steps": [
-      { "id": 1, "title": "...", "description": "...", "dependencies": [] },
-      { "id": 2, "title": "...", "description": "...", "dependencies": ["..."] }
+      { "id": 1, "title": "…", "description": "…", "dependencies": [] },
+      { "id": 2, "title": "…", "description": "…", "dependencies": ["…"] }
     ]
   }
 ]`;
-  const jsonText = await callOpenAI(prompt);
-  try {
-    return JSON.parse(jsonText) as ActionPlanData;
-  } catch (e) {
-    console.error('parse action plan failed:', jsonText);
-    throw new Error('Failed to parse action plan JSON.');
-  }
-}
 
-// 7) generateFeasibilityStudy (expects JSON object)
-export async function generateFeasibilityStudy(
+  try {
+    const jsonText = await callOpenAI(prompt);
+    return JSON.parse(jsonText) as ActionPlanData;
+  } catch (error) {
+    console.error('Error generating action plan:', error);
+    throw new Error('Failed to generate action plan.');
+  }
+};
+
+// ------------------------------------------------------------------
+// 7) generateFeasibilityStudy (returns JSON object like original)
+// ------------------------------------------------------------------
+export const generateFeasibilityStudy = async (
   idea: string,
   inputs: FeasibilityInputs
-): Promise<FeasibilityStudyData> {
-  const prompt = `Create a feasibility study for: "${idea}".
+): Promise<FeasibilityStudyData> => {
+  const prompt = `
+You are an expert business analyst. Conduct a comprehensive, highly customized Feasibility Study for THIS specific idea only. Avoid generic advice.
 
-Inputs:
-- Budget: ${inputs.budget || 'Not provided'}
+Business Idea: "${idea}"
+
+Optional User Inputs:
+- Estimated Budget: ${inputs.budget || 'Not provided'}
 - Team Size: ${inputs.teamSize || 'Not provided'}
-- Timeline: ${inputs.timeline || 'Not provided'}
-- Market Size: ${inputs.marketSize || 'Not provided'}
+- Desired Timeline to Launch: ${inputs.timeline || 'Not provided'}
+- Target Market Size: ${inputs.marketSize || 'Not provided'}
 
-Return JSON ONLY with this exact shape:
+Analyze and return JSON ONLY with this exact structure (no markdown):
 {
-  "overview": "...",
+  "overview": "A concise overview paragraph.",
   "verdict": "Highly Feasible" | "Feasible with Adjustments" | "Needs Revision" | "High Risk / Not Yet Feasible",
-  "market": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "technical": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "financial": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "operational": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "legalAndEthical": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "environmentalAndSocial": { "explanation": "...", "score": "Low|Medium|High", "recommendations": ["..."] },
-  "costSimulation": { "totalProjectedCost": "...", "expectedROI": "...", "breakEvenTimeline": "..." },
-  "finalInsights": ["...", "..."]
-}
-Rules: JSON only, no markdown; tailor every line to this idea.`;
+  "market": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "technical": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "financial": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "operational": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "legalAndEthical": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "environmentalAndSocial": { "explanation": "…", "score": "Low" | "Medium" | "High", "recommendations": ["…"] },
+  "costSimulation": { "totalProjectedCost": "…", "expectedROI": "…", "breakEvenTimeline": "…" },
+  "finalInsights": ["…", "…"]
+}`;
 
-  const jsonText = await callOpenAI(prompt);
   try {
+    const jsonText = await callOpenAI(prompt);
     return JSON.parse(jsonText) as FeasibilityStudyData;
-  } catch (e) {
-    console.error('parse feasibility failed:', jsonText);
-    throw new Error('Failed to parse feasibility JSON.');
+  } catch (error) {
+    console.error('Error generating feasibility study:', error);
+    throw new Error('Failed to generate feasibility study.');
   }
-}
+};
