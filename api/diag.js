@@ -1,22 +1,18 @@
-// /api/diag.js — simple diagnostics for OpenAI setup
+// /api/diag.js — simple diagnostics for OpenRouter (DeepSeek)
 export default async function handler(req, res) {
   try {
-    const hasEnvVar = Boolean(process.env.OPENAI_API_KEY);
+    const hasEnvVar = Boolean(process.env.OPENROUTER_API_KEY);
     let upstreamStatus = null;
     let upstreamBody = null;
 
     if (hasEnvVar) {
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
+      // Ping OpenRouter directly to verify the key works
+      const r = await fetch("https://openrouter.ai/api/v1/models", {
+        method: "GET",
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [{ role: "user", content: "ping" }],
-          temperature: 0,
-        }),
       });
       upstreamStatus = r.status;
       upstreamBody = await r.text();
@@ -26,7 +22,7 @@ export default async function handler(req, res) {
       ok: true,
       hasEnvVar,
       upstreamStatus,
-      upstreamBodySnippet: upstreamBody?.slice(0, 200) ?? null,
+      upstreamBodySnippet: upstreamBody?.slice(0, 300) ?? null,
     });
   } catch (e) {
     res.status(500).json({ ok: false, detail: String(e) });
