@@ -15,6 +15,46 @@ import type {
 } from '../types';
 import { FRAMEWORKS } from '../constants';
 
+
+/** Extract a JSON array of strings from a model response safely. */
+function extractJsonArray(text: string): string[] {
+  // strip code fences if present
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  // Try direct parse first
+  try {
+    const maybe = JSON.parse(cleaned);
+    if (Array.isArray(maybe) && maybe.every(q => typeof q === "string")) {
+      return maybe;
+    }
+  } catch (_) {
+    /* ignore and try fallback */
+  }
+
+  // Fallback: find first [...] block and parse that
+  const match = cleaned.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      const arr = JSON.parse(match[0]);
+      if (Array.isArray(arr) && arr.every(q => typeof q === "string")) {
+        return arr;
+      }
+    } catch (_) {/* ignore */}
+  }
+
+  // Last resort: degrade to line split (filters junk)
+  return cleaned
+    .split("\n")
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => !/^q\d*\s*[:\-]/i.test(s)) // drop "Q1:" style
+    .slice(0, 5);
+}
+
 // --- Helper: call your serverless route that proxies to OpenAI ---
 async function callOpenAI(prompt: string): Promise<string> {
   const res = await fetch('/api/openai', {
@@ -45,18 +85,32 @@ export const generateRefinementQuestions = async (
   idea: string,
   onNewQuestion: (question: string) => void
 ): Promise<void> => {
-  const prompt = `You are an expert business consultant. Given the following business idea, ask 3–5 insightful, highly specific clarifying questions (no numbering, one per line, no extra text).
+  const prompt = `
+You are an expert venture strategist.
 
-Business Idea: "${idea}"`;
+Task: Generate 3–5 highly specific clarification questions to refine this single business idea.
+- Questions must be tailored to THIS idea only (no generic startup questions).
+- Focus on value proposition, target segment, differentiation, feasibility, and measurable outcomes as relevant.
+- Keep each question short and clear (<= 180 characters).
+- DO NOT number questions. DO NOT add commentary.
+
+Output FORMAT (STRICT):
+Return ONLY a JSON array of strings, no keys, no markdown, no code fences, no prose.
+Example:
+[
+  "Question one?",
+  "Question two?",
+  "Question three?"
+]
+
+Business Idea:
+"${idea}"
+`.trim();
 
   try {
-    // We don't stream from OpenAI here; just split by line like the original buffer logic.
     const text = await callOpenAI(prompt);
-    text
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean)
-      .forEach(onNewQuestion);
+    const arr = extractJsonArray(text);
+    arr.forEach(q => q && onNewQuestion(q));
   } catch (error) {
     console.error('Error generating refinement questions:', error);
     throw new Error('Failed to generate refinement questions.');
