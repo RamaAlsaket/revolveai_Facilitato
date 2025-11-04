@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   }
 
   // Read ONLY OPENROUTER_API_KEY to keep it unambiguous
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = process.env.API_KEY || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
