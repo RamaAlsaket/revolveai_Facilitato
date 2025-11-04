@@ -4,38 +4,40 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const apiKey = process.env.API_KEY || process.env.OPENROUTER_API_KEY;
+  // Read ONLY OPENROUTER_API_KEY to keep it unambiguous
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "Missing API key" });
+    return res.status(500).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
 
-  const { prompt } = req.body || {};
+  const { prompt, model } = req.body || {};
   if (!prompt) {
-    return res.status(400).json({ error: "Missing prompt" });
+    return res.status(400).json({ error: true, detail: "Missing prompt" });
   }
 
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // Optional but recommended:
+        // OpenRouter recommends these headers
         "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
-        "X-Title": "RevolveAI Facilitator"
+        "X-Title": "RevolveAI Facilitator",
       },
       body: JSON.stringify({
-        model: "deepseek/deepseek-r1:free",
-        temperature: 0.2, // lower => follows JSON format better
+        // pick one; or allow client to pass model in req.body.model
+        model: model || "deepseek/deepseek-chat",
+        temperature: 0.3,
         messages: [
           {
             role: "system",
             content:
-              "You are RevolveAI Facilitator — concise, structured, and you return valid JSON when asked."
+              "You are RevolveAI Facilitator — concise, structured, and you return valid JSON when asked. Avoid any markdown unless explicitly requested.",
           },
-          { role: "user", content: prompt }
-        ]
-      })
+          { role: "user", content: prompt },
+        ],
+      }),
     });
 
     if (!r.ok) {
