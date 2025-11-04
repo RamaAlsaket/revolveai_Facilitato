@@ -16,6 +16,30 @@ import type {
 import { FRAMEWORKS } from '../constants';
 
 
+// --- Helper: call your serverless route that proxies to OpenAI ---
+async function callOpenAI(prompt: string): Promise<string> {
+  const res = await fetch('/api/openai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  const data = await res.json();
+  if (!res.ok || data?.error) {
+    throw new Error(data?.detail || 'OpenAI request failed');
+  }
+  return (data.text || '').toString().trim();
+}
+
+// --- Helper: keep parity with original "getFrameworkDefinition" ---
+const getFrameworkDefinition = (framework: AnalysisFramework) => {
+  const definition = FRAMEWORKS.find(f => f.id === framework);
+  if (!definition) {
+    throw new Error(`Framework definition for ${framework} not found.`);
+  }
+  return definition;
+};
+
+
 /** Extract a JSON array of strings from a model response safely. */
 function extractJsonArray(text: string): string[] {
   // strip code fences if present
@@ -54,29 +78,6 @@ function extractJsonArray(text: string): string[] {
     .filter(s => !/^q\d*\s*[:\-]/i.test(s)) // drop "Q1:" style
     .slice(0, 5);
 }
-
-// --- Helper: call your serverless route that proxies to OpenAI ---
-async function callOpenAI(prompt: string): Promise<string> {
-  const res = await fetch('/api/openai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  const data = await res.json();
-  if (!res.ok || data?.error) {
-    throw new Error(data?.detail || 'OpenAI request failed');
-  }
-  return (data.text || '').toString().trim();
-}
-
-// --- Helper: keep parity with original "getFrameworkDefinition" ---
-const getFrameworkDefinition = (framework: AnalysisFramework) => {
-  const definition = FRAMEWORKS.find(f => f.id === framework);
-  if (!definition) {
-    throw new Error(`Framework definition for ${framework} not found.`);
-  }
-  return definition;
-};
 
 // ------------------------------------------------------------------
 // 1) generateRefinementQuestions (keeps same signature + behavior)
