@@ -27,8 +27,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         // pick one; or allow client to pass model in req.body.model
-        model: model || "deepseek/deepseek-chat",
-        temperature: 0.3,
+        model: "deepseek/deepseek-chat:free",   // << was deepseek-r1:free
+        temperature: 0.1,
         messages: [
           {
             role: "system",
