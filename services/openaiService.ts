@@ -17,16 +17,14 @@ import { FRAMEWORKS } from '../constants';
 
 
 // --- Helper: call your serverless route that proxies to OpenAI ---
-async function callOpenAI(prompt: string): Promise<string> {
+async function callOpenAI(prompt: string, expectsJson = false): Promise<string> {
   const res = await fetch('/api/openai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, expectsJson }), // send flag to backend
   });
   const data = await res.json();
-  if (!res.ok || data?.error) {
-    throw new Error(data?.detail || 'OpenAI request failed');
-  }
+  if (!res.ok || data?.error) throw new Error(data?.detail || 'OpenRouter request failed');
   return (data.text || '').toString().trim();
 }
 
