@@ -4,15 +4,23 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Read ONLY OPENROUTER_API_KEY to keep it unambiguous
-  const apiKey = process.env.API_KEY || process.env.OPENROUTER_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
+    return res.status(500).json({ error: "Missing API key" });
   }
 
-  const { prompt, model } = req.body || {};
+  const { prompt, expectsJson } = req.body || {};
   if (!prompt) {
-    return res.status(400).json({ error: true, detail: "Missing prompt" });
+    return res.status(400).json({ error: "Missing prompt" });
+  }
+
+  // ✅ JSON sanitizer helper: finds the first valid JSON object/array in the text
+  function extractJson(text) {
+    const arrMatch = text.match(/\[[\s\S]*\]/);
+    if (arrMatch) return arrMatch[0];
+    const objMatch = text.match(/\{[\s\S]*\}/);
+    if (objMatch) return objMatch[0];
+    return text;
   }
 
   try {
@@ -21,19 +29,18 @@ export default async function handler(req, res) {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // OpenRouter recommends these headers
         "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
         "X-Title": "RevolveAI Facilitator",
       },
       body: JSON.stringify({
-        // pick one; or allow client to pass model in req.body.model
-        model: "deepseek/deepseek-chat:free",   // << was deepseek-r1:free
-        temperature: 0.1,
+        model: "deepseek/deepseek-chat:free", // ✅ better JSON compliance
+        temperature: expectsJson ? 0.1 : 0.2,
         messages: [
           {
             role: "system",
-            content:
-              "You are RevolveAI Facilitator — concise, structured, and you return valid JSON when asked. Avoid any markdown unless explicitly requested.",
+            content: expectsJson
+              ? "Return ONLY valid JSON. No markdown, no code fences, no commentary."
+              : "You are RevolveAI Facilitator — concise, structured, and clear.",
           },
           { role: "user", content: prompt },
         ],
@@ -46,7 +53,17 @@ export default async function handler(req, res) {
     }
 
     const data = await r.json();
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    let text = data?.choices?.[0]?.message?.content ?? "";
+
+    if (expectsJson) {
+      text = extractJson(text);
+      try {
+        JSON.parse(text); // Validate JSON
+      } catch {
+        console.warn("⚠️ Model returned invalid JSON, passing raw text back.");
+      }
+    }
+
     return res.status(200).json({ ok: true, text });
   } catch (e) {
     return res.status(500).json({ error: true, detail: String(e) });
