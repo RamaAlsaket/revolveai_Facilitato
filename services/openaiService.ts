@@ -17,15 +17,40 @@ import { FRAMEWORKS } from '../constants';
 
 
 // --- Helper: call your serverless route that proxies to OpenAI ---
-async function callOpenAI(prompt: string, expectsJson = false): Promise<string> {
+async function callOpenAI(prompt: string): Promise<string> {
   const res = await fetch('/api/openai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, expectsJson }), // send flag to backend
+    body: JSON.stringify({ prompt }),
   });
-  const data = await res.json();
-  if (!res.ok || data?.error) throw new Error(data?.detail || 'OpenRouter request failed');
-  return (data.text || '').toString().trim();
+
+  let data: any = null;
+  try { data = await res.json(); } catch {}
+
+  if (!res.ok || data?.error) {
+    const detail = data?.detail || data?.message || `Upstream error (status ${res.status})`;
+    throw new Error(detail);
+  }
+
+  return (data?.text || '').toString().trim();
+}
+
+/** Remove hidden <think>…</think> blocks and code fences the model might add */
+function stripNoisyWrappers(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '') // DeepSeek/others sometimes add this
+    .replace(/```(?:json)?/gi, '```')          // normalize code fences
+    .replace(/```/g, '')                       // remove code fences
+    .trim();
+}
+
+/** Convert any list-like output into plain one-per-line questions */
+function toPlainLines(text: string): string[] {
+  return text
+    .split('\n')
+    // remove bullets/numbers like "- ", "1) ", "1. ", "* ", etc.
+    .map(s => s.replace(/^\s*[-*•\d.()]+\s*/, '').trim())
+    .filter(Boolean);
 }
 
 // --- Helper: keep parity with original "getFrameworkDefinition" ---
@@ -84,37 +109,50 @@ export const generateRefinementQuestions = async (
   idea: string,
   onNewQuestion: (question: string) => void
 ): Promise<void> => {
-  const prompt = `
-You are an expert venture strategist.
+  const prompt = `You are an expert business consultant.
+Given the business idea below, ask EXACTLY 4 **clarifying questions** that would help refine it.
+Rules you MUST follow:
+- Output EXACTLY 4 lines.
+- One question per line.
+- No numbering, no bullets, no markdown, no extra commentary.
+- The questions must be highly specific to THIS idea.
 
-Task: Generate 3–5 highly specific clarification questions to refine this single business idea.
-- Questions must be tailored to THIS idea only (no generic startup questions).
-- Focus on value proposition, target segment, differentiation, feasibility, and measurable outcomes as relevant.
-- Keep each question short and clear (<= 180 characters).
-- DO NOT number questions. DO NOT add commentary.
-
-Output FORMAT (STRICT):
-Return ONLY a JSON array of strings, no keys, no markdown, no code fences, no prose.
-Example:
-[
-  "Question one?",
-  "Question two?",
-  "Question three?"
-]
-
-Business Idea:
-"${idea}"
-`.trim();
+Business Idea: "${idea}"`;
 
   try {
-    const text = await callOpenAI(prompt);
-    const arr = extractJsonArray(text);
-    arr.forEach(q => q && onNewQuestion(q));
+    let text = await callOpenAI(prompt);
+
+    // Defensive cleanup
+    text = stripNoisyWrappers(text);
+
+    // Normalize to plain lines and enforce exactly 4
+    const lines = toPlainLines(text).slice(0, 4);
+
+    if (lines.length < 4) {
+      // If the model still didn’t follow instructions, try a cheap local fallback:
+      // split by '?' to salvage questions, then rebuild 4 lines.
+      const salvage = stripNoisyWrappers(text)
+        .split('?')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => (s.endsWith('?') ? s : s + '?'))
+        .slice(0, 4);
+
+      if (salvage.length >= 3) {
+        salvage.forEach(onNewQuestion);
+        return;
+      }
+
+      throw new Error('Model did not return 4 clean questions.');
+    }
+
+    lines.forEach(onNewQuestion);
   } catch (error) {
     console.error('Error generating refinement questions:', error);
     throw new Error('Failed to generate refinement questions.');
   }
 };
+
 
 // ------------------------------------------------------------------
 // 2) summarizeIdeaWithAnswers (same output: one paragraph)
