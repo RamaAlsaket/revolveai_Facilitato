@@ -11,8 +11,10 @@ export default async function handler(req, res) {
     process.env.OPENROUTER_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
+    return res.status(400).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
+  console.log("Using API Key:", !!apiKey);
+  console.log("Prompt length:", prompt.length);
 
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== "string") {
