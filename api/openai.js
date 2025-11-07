@@ -1,10 +1,9 @@
-// /api/openai.js — Vercel serverless route using OpenRouter (DeepSeek Chat: free)
+// /api/openai.js — Vercel serverless route using OpenRouter (DeepSeek v1)
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: true, detail: "Method not allowed" });
   }
 
-  // Accept any of these names so your env doesn't block you
   const apiKey =
     process.env.OPENROUTER_API_KEY ||
     process.env.API_KEY ||
@@ -13,13 +12,16 @@ export default async function handler(req, res) {
   if (!apiKey) {
     return res.status(400).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
-  console.log("Using API Key:", !!apiKey);
-  console.log("Prompt length:", prompt.length);
 
+  // ✅ declare prompt BEFORE using it
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== "string") {
     return res.status(400).json({ error: true, detail: "Missing prompt" });
   }
+
+  // safe logs
+  console.log("Using API Key present:", !!apiKey);
+  console.log("Prompt length:", prompt.length);
 
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -27,12 +29,12 @@ export default async function handler(req, res) {
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // These MUST match your deployed origin & a title (OpenRouter requires this for free tier)
+        // free-tier requires these:
         "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
         "X-Title": "RevolveAI Facilitator"
       },
       body: JSON.stringify({
-        // IMPORTANT: use text-only free model (no <think> blocks)
+        // Use a text-only model (no <think> blocks)
         model: "deepseek/deepseek-v1",
         temperature: 0.2,
         max_tokens: 400,
@@ -48,7 +50,6 @@ export default async function handler(req, res) {
     });
 
     if (!r.ok) {
-      // Bubble up readable upstream detail
       let detail;
       try {
         const j = await r.json();
