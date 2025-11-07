@@ -44,7 +44,8 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           model,
           temperature: 0.2,
-          max_tokens: 500,
+          max_tokens: maxTokens ?? (json ? 3000 : 600),   // <— key change
+          response_format: json ? { type: "json_object" } : undefined,
           messages: [
             {
               role: "system",
