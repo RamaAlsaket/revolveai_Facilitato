@@ -39,10 +39,14 @@ async function callOpenAI(prompt: string): Promise<string> {
   if (!res.ok || data?.error) {
     const reason = data?.detail || `HTTP ${res.status}`;
     console.error("LLM error:", reason);
-    throw new Error(reason); // your UI will display this reason in the red banner
+    throw new Error(reason); // ensures the exact upstream detail appears in your red banner
   }
 
-  return cleanLLM(String(data?.text || ""));
+  // your cleaner is fine:
+  return (data.text || "").toString()
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```json/gi, "```").replace(/```/g, "")
+    .trim();
 }
 
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
