@@ -1,4 +1,6 @@
-// /api/openai.js — Vercel serverless route using OpenRouter (with model fallbacks)
+// /api/openai.js — Vercel serverless route using OpenRouter (DeepSeek)
+// Accepts options from the client so long JSON responses work.
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: true, detail: "Method not allowed" });
@@ -13,82 +15,57 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
 
-  const { prompt } = req.body || {};
+  // ⬅️ Accept options from the client
+  const { prompt, json, maxTokens } = req.body || {};
   if (!prompt || typeof prompt !== "string") {
     return res.status(400).json({ error: true, detail: "Missing prompt" });
   }
 
-  // Ask text-only capable models first; avoid r1 (adds <think> blocks)
-  const MODEL_CANDIDATES = [
-    "deepseek/deepseek-chat",   // usually available
-    "deepseek/deepseek-v3",     // good general model
-    "deepseek/deepseek-v1",     // older but text-only
-    "openrouter/auto"           // last-resort router
-  ];
+  // Large JSON needs more than 400 tokens
+  const MAX_ALLOWED = 8000;
+  const max_tokens = Math.min(Number(maxTokens) || 3200, MAX_ALLOWED);
 
-  const baseHeaders = {
-    "Authorization": `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    // Required for OpenRouter free tier:
-    "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
-    "X-Title": "RevolveAI Facilitator"
-  };
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
+        "X-Title": "RevolveAI Facilitator",
+      },
+      body: JSON.stringify({
+        // If deepseek/deepseek-v1 is unavailable on your key, swap to "deepseek/deepseek-chat"
+        model: "deepseek/deepseek-v1",
+        temperature: 0.2,
+        max_tokens,
+        ...(json ? { response_format: { type: "json_object" } } : {}),
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are RevolveAI Facilitator — concise and structured. When asked for JSON, return a single valid JSON object/array with no extra commentary.",
+          },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
 
-  let lastDetail = null;
-
-  for (const model of MODEL_CANDIDATES) {
-    try {
-      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: baseHeaders,
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          max_tokens: maxTokens ?? (json ? 3000 : 600),   // <— key change
-          response_format: json ? { type: "json_object" } : undefined,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are RevolveAI Facilitator — be concise. When asked for lists, return plain text lines (no JSON/markdown)."
-            },
-            { role: "user", content: prompt }
-          ]
-        })
-      });
-
-      if (!r.ok) {
-        // Capture upstream error detail; continue to next model on 404/400 "no endpoints"
-        let detail;
-        try {
-          const j = await r.json();
-          detail = j?.error?.message || j?.message || JSON.stringify(j);
-        } catch {
-          detail = await r.text();
-        }
-
-        lastDetail = `Model ${model} failed: ${detail}`;
-        // OpenRouter says "No endpoints found..." for models not enabled; try next
-        if (r.status === 404 || (typeof detail === "string" && /no endpoints/i.test(detail))) {
-          continue;
-        }
-        // Other errors: bubble up
-        return res.status(r.status).json({ error: true, status: r.status, detail: lastDetail });
+    if (!r.ok) {
+      let detail;
+      try {
+        const j = await r.json();
+        detail = j?.error?.message || j?.message || JSON.stringify(j);
+      } catch {
+        detail = await r.text();
       }
-
-      const data = await r.json();
-      const text = data?.choices?.[0]?.message?.content ?? "";
-      return res.status(200).json({ ok: true, text, modelUsed: model });
-    } catch (e) {
-      lastDetail = `Model ${model} threw: ${String(e)}`;
-      // try next model
-      continue;
+      return res.status(r.status).json({ error: true, status: r.status, detail });
     }
-  }
 
-  // If we got here, all candidates failed
-  return res.status(502).json({
-    error: true,
-    detail: lastDetail || "All model candidates failed"
-  });
+    const data = await r.json();
+    const text = data?.choices?.[0]?.message?.content ?? "";
+    return res.status(200).json({ ok: true, text });
+  } catch (e) {
+    return res.status(500).json({ error: true, detail: String(e) });
+  }
 }
