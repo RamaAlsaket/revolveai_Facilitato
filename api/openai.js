@@ -31,7 +31,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         // IMPORTANT: use text-only free model (no <think> blocks)
-        model: "deepseek/deepseek-chat:free",
+        model: "deepseek/deepseek-v1",
         temperature: 0.2,
         max_tokens: 400,
         messages: [
