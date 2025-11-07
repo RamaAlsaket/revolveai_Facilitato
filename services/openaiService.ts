@@ -21,12 +21,13 @@ import { FRAMEWORKS } from '../constants';
 // 1) Cleaners at top of file
 function cleanLLM(text: string): string {
   if (!text) return "";
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");          // remove hidden chains
-  text = text.replace(/```json/gi, "```").replace(/```/g, "");    // remove code fences
-  return text.trim();
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```json/gi, "```")
+    .replace(/```/g, "")
+    .trim();
 }
 
-// 2) The call function used everywhere inside this file
 type CallOpts = { json?: boolean; maxTokens?: number };
 
 async function callOpenAI(prompt: string, opts: CallOpts = {}): Promise<string> {
@@ -35,15 +36,17 @@ async function callOpenAI(prompt: string, opts: CallOpts = {}): Promise<string> 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, json: opts.json, maxTokens: opts.maxTokens }),
   });
+
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.error) {
+
+  if (!res.ok || (data && data.error)) {
     const reason = data?.detail || `HTTP ${res.status}`;
     console.error("LLM error:", reason);
     throw new Error(reason);
   }
+
   return cleanLLM(String(data?.text || ""));
 }
-
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
 function stripNoisyWrappers(text: string): string {
   return text
