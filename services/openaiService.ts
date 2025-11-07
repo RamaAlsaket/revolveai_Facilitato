@@ -18,29 +18,31 @@ import { FRAMEWORKS } from '../constants';
 
 // --- Helper: call your serverless route that proxies to OpenAI ---
 // Add this helper near the top of openaiService.ts
+// 1) Cleaners at top of file
 function cleanLLM(text: string): string {
   if (!text) return "";
-  // Remove <think> blocks
-  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  // Remove ```json ``` or ``` fences
-  text = text.replace(/```json/gi, "```").replace(/```/g, "");
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");          // remove hidden chains
+  text = text.replace(/```json/gi, "```").replace(/```/g, "");    // remove code fences
   return text.trim();
 }
 
-// Then modify callOpenAI to apply the cleaner before returning
+// 2) The call function used everywhere inside this file
 async function callOpenAI(prompt: string): Promise<string> {
   const res = await fetch("/api/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt }),
   });
-  const data = await res.json();
+
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok || data?.error) {
-    throw new Error(data?.detail || "OpenRouter request failed");
+    const reason = data?.detail || `HTTP ${res.status}`;
+    console.error("LLM error:", reason);
+    throw new Error(reason); // your UI will display this reason in the red banner
   }
 
-  return cleanLLM((data.text || "").toString());
+  return cleanLLM(String(data?.text || ""));
 }
 
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
