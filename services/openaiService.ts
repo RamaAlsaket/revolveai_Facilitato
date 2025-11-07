@@ -17,22 +17,30 @@ import { FRAMEWORKS } from '../constants';
 
 
 // --- Helper: call your serverless route that proxies to OpenAI ---
+// Add this helper near the top of openaiService.ts
+function cleanLLM(text: string): string {
+  if (!text) return "";
+  // Remove <think> blocks
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // Remove ```json ``` or ``` fences
+  text = text.replace(/```json/gi, "```").replace(/```/g, "");
+  return text.trim();
+}
+
+// Then modify callOpenAI to apply the cleaner before returning
 async function callOpenAI(prompt: string): Promise<string> {
-  const res = await fetch('/api/openai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch("/api/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt }),
   });
-
-  let data: any = null;
-  try { data = await res.json(); } catch {}
+  const data = await res.json();
 
   if (!res.ok || data?.error) {
-    const detail = data?.detail || data?.message || `Upstream error (status ${res.status})`;
-    throw new Error(detail);
+    throw new Error(data?.detail || "OpenRouter request failed");
   }
 
-  return (data?.text || '').toString().trim();
+  return cleanLLM((data.text || "").toString());
 }
 
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
