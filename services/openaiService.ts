@@ -27,26 +27,21 @@ function cleanLLM(text: string): string {
 }
 
 // 2) The call function used everywhere inside this file
-async function callOpenAI(prompt: string): Promise<string> {
+type CallOpts = { json?: boolean; maxTokens?: number };
+
+async function callOpenAI(prompt: string, opts: CallOpts = {}): Promise<string> {
   const res = await fetch("/api/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, json: opts.json, maxTokens: opts.maxTokens }),
   });
-
   const data = await res.json().catch(() => ({}));
-
   if (!res.ok || data?.error) {
     const reason = data?.detail || `HTTP ${res.status}`;
     console.error("LLM error:", reason);
-    throw new Error(reason); // ensures the exact upstream detail appears in your red banner
+    throw new Error(reason);
   }
-
-  // your cleaner is fine:
-  return (data.text || "").toString()
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/```json/gi, "```").replace(/```/g, "")
-    .trim();
+  return cleanLLM(String(data?.text || ""));
 }
 
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
@@ -215,7 +210,7 @@ Return JSON ONLY that matches this schema (do not include markdown or commentary
 ${JSON.stringify(frameworkDef.schema, null, 2)}`;
 
   try {
-    const jsonText = await callOpenAI(prompt, true);
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
     return JSON.parse(jsonText) as AnalysisData;
   } catch (error) {
     console.error(`Error generating ${framework} analysis:`, error);
@@ -246,7 +241,7 @@ Rules:
 - The leaf nodes at the deepest level should include a numeric "value" field (e.g., 10).`;
 
   try {
-    const jsonText = await callOpenAI(prompt, true);
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
     return JSON.parse(jsonText) as MindMapNode;
   } catch (error) {
     console.error('Error generating mind map data:', error);
@@ -265,7 +260,7 @@ Each milestone must be specific to this idea (no generic advice). Provide JSON a
 ]`;
 
   try {
-    const jsonText = await callOpenAI(prompt, true);
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 2000 });
     return JSON.parse(jsonText) as Milestone[];
   } catch (error) {
     console.error('Error generating milestones:', error);
@@ -292,7 +287,7 @@ Return JSON array ONLY (no markdown), e.g.:
 ]`;
 
   try {
-    const jsonText = await callOpenAI(prompt,true);
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
     return JSON.parse(jsonText) as ActionPlanData;
   } catch (error) {
     console.error('Error generating action plan:', error);
@@ -333,7 +328,7 @@ Analyze and return JSON ONLY with this exact structure (no markdown):
 }`;
 
   try {
-    const jsonText = await callOpenAI(prompt, true);
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
     return JSON.parse(jsonText) as FeasibilityStudyData;
   } catch (error) {
     console.error('Error generating feasibility study:', error);
