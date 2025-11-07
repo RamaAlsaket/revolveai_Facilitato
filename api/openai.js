@@ -1,71 +1,65 @@
-// /api/openai.js — Vercel Serverless API route for OpenRouter (DeepSeek chat)
-
+// /api/openai.js — Vercel Serverless API route for OpenRouter (DeepSeek via OpenRouter)
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // Accept either OPENROUTER_API_KEY or API_KEY (fallback)
+  const apiKey =
+    process.env.OPENROUTER_API_KEY ||
+    process.env.API_KEY ||
+    process.env.OPENAI_API_KEY; // last-ditch fallback if someone reused the name
+
+  if (!apiKey) {
+    return res.status(500).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
+  }
+
+  const { prompt, model: clientModel } = req.body || {};
+  if (!prompt) {
+    return res.status(400).json({ error: true, detail: "Missing prompt" });
+  }
+
+  // Use a safer, short, plain-text friendly free model
+  // (The R1 reasoning models often prepend <think> blocks and can exceed limits)
+  const model = clientModel || "deepseek/deepseek-chat:free";
+
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
-    }
-
-    // IMPORTANT: Make sure the name matches what you set in Vercel
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "Missing OPENROUTER_API_KEY" });
-    }
-
-    // Vercel Node serverless parses JSON into req.body
-    const { prompt } = req.body || {};
-    if (!prompt || typeof prompt !== "string") {
-      return res.status(400).json({ error: "Missing prompt" });
-    }
-
-    // Use a chat model (NOT R1) — R1 adds <think> blocks that break your UI
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        // Recommended (helps with OpenRouter rate limits):
-        "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
-        "X-Title": "RevolveAI Facilitator"
+
+        // OpenRouter recommends these (set Referer to your deployed origin)
+        "HTTP-Referer": req.headers.origin || "https://revolveai-facilitato.vercel.app",
+        "X-Title": "RevolveAI Facilitator",
       },
       body: JSON.stringify({
-        model: "deepseek/deepseek-chat:free",
-        temperature: 0.2, // low temp for structured outputs
+        model,
+        temperature: 0.2,
         messages: [
           {
             role: "system",
             content:
-              "You are RevolveAI Facilitator — be concise, structured, and follow formatting instructions exactly. Do NOT include markdown code fences or <think> blocks."
+              "You are RevolveAI Facilitator. Be concise and return VALID JSON when asked. Do not wrap outputs in markdown fences. Never include <think> blocks in your final answer.",
           },
-          { role: "user", content: prompt }
-        ]
-      })
+          { role: "user", content: prompt },
+        ],
+      }),
     });
 
-    const raw = await r.text();
-
-    // If upstream fails, surface the reason back to the client
+    const textDetail = await r.text(); // preserve raw detail for debugging
     if (!r.ok) {
-      return res.status(r.status).json({
-        error: true,
-        status: r.status,
-        detail: raw.slice(0, 800) // send first part of error text for debugging
-      });
+      // Bubble up exact upstream error so you see it in Network tab
+      return res.status(r.status).json({ error: true, status: r.status, detail: textDetail });
     }
 
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return res.status(502).json({
-        error: true,
-        status: 502,
-        detail: "Upstream returned non-JSON response",
-        snippet: raw.slice(0, 800)
-      });
-    }
+    const data = JSON.parse(textDetail);
+    let text = data?.choices?.[0]?.message?.content ?? "";
 
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    // Strip <think> ... </think> if present
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
     return res.status(200).json({ ok: true, text });
   } catch (e) {
     return res.status(500).json({ error: true, detail: String(e) });
