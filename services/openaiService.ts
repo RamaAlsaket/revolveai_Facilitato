@@ -32,26 +32,32 @@ function cleanLLM(text: string): string {
 // 2) Types and call function used everywhere inside this file
 type CallOpts = { json?: boolean; maxTokens?: number };
 
-async function callOpenAI(prompt: string, opts: CallOpts = {}): Promise<string> {
+async function callOpenAI(
+  prompt: string,
+  opts?: boolean | CallOpts
+): Promise<string> {
+  const o: CallOpts = typeof opts === "boolean" ? { json: opts } : (opts || {});
+  const payload = {
+    prompt,
+    json: !!o.json,
+    maxTokens: o.maxTokens ?? 1200,
+  };
+
   const res = await fetch("/api/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      json: Boolean(opts.json),
-      maxTokens: typeof opts.maxTokens === "number" ? opts.maxTokens : undefined
-    }),
+    body: JSON.stringify(payload),
   });
 
   const data = await res.json().catch(() => ({}));
 
-  if (!res.ok || data?.error) {
-    const reason = data?.detail || `HTTP ${res.status}`;
+  if (!res.ok || (data as any)?.error) {
+    const reason = (data as any)?.detail || `HTTP ${res.status}`;
     console.error("LLM error:", reason);
-    throw new Error(reason); // surfaces upstream detail in your red banner
+    throw new Error(reason);
   }
 
-  return cleanLLM(String(data?.text || ""));
+  return cleanLLM(String((data as any)?.text || ""));
 }
 
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
