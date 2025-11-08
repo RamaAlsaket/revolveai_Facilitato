@@ -226,7 +226,7 @@ Return JSON ONLY that matches this schema (do not include markdown or commentary
 ${JSON.stringify(frameworkDef.schema, null, 2)}`;
 
   try {
-    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3000 });
     return JSON.parse(jsonText) as AnalysisData;
   } catch (error) {
     console.error(`Error generating ${framework} analysis:`, error);
@@ -257,7 +257,7 @@ Rules:
 - The leaf nodes at the deepest level should include a numeric "value" field (e.g., 10).`;
 
   try {
-    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3000 });
     return JSON.parse(jsonText) as MindMapNode;
   } catch (error) {
     console.error('Error generating mind map data:', error);
@@ -344,7 +344,7 @@ Analyze and return JSON ONLY with this exact structure (no markdown):
 }`;
 
   try {
-    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3200 });
+    const jsonText = await callOpenAI(prompt, { json: true, maxTokens: 3000 });
     return JSON.parse(jsonText) as FeasibilityStudyData;
   } catch (error) {
     console.error('Error generating feasibility study:', error);
