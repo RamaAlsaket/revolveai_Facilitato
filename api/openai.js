@@ -1,11 +1,10 @@
-// /api/openai.js — Vercel serverless route using OpenRouter (DeepSeek)
-// Accepts options from the client so long JSON responses work.
-
+// /api/openai.js — Vercel serverless route using OpenRouter (DeepSeek-friendly)
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: true, detail: "Method not allowed" });
   }
 
+  // Accept several env names so deployment doesn’t get stuck
   const apiKey =
     process.env.OPENROUTER_API_KEY ||
     process.env.API_KEY ||
@@ -15,43 +14,45 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: true, detail: "Missing OPENROUTER_API_KEY" });
   }
 
-  // ⬅️ Accept options from the client
-  const { prompt, json, maxTokens } = req.body || {};
+  // Read the body FIRST (do not log prompt before this)
+  const { prompt, json: wantJson, maxTokens } = req.body || {};
   if (!prompt || typeof prompt !== "string") {
     return res.status(400).json({ error: true, detail: "Missing prompt" });
   }
 
-  // Large JSON needs more than 400 tokens
-  const MAX_ALLOWED = 8000;
-  const max_tokens = Math.min(Number(maxTokens) || 3200, MAX_ALLOWED);
+  // Choose a model that’s available on free tier (no <think> blocks)
+  // deepseek-v1 works well for JSON; fallback list is optional.
+  const MODEL = "deepseek/deepseek-v1";
 
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        // Required by OpenRouter free tier:
         "HTTP-Referer": "https://revolveai-facilitato.vercel.app",
-        "X-Title": "RevolveAI Facilitator",
+        "X-Title": "RevolveAI Facilitator"
       },
       body: JSON.stringify({
-        // If deepseek/deepseek-v1 is unavailable on your key, swap to "deepseek/deepseek-chat"
-        model: "deepseek/deepseek-v1",
+        model: MODEL,
         temperature: 0.2,
-        max_tokens,
-        ...(json ? { response_format: { type: "json_object" } } : {}),
+        max_tokens: typeof maxTokens === "number" ? maxTokens : 400, // small by default
+        // Ask for strict JSON only when the client needs it
+        ...(wantJson ? { response_format: { type: "json_object" } } : {}),
         messages: [
           {
             role: "system",
             content:
-              "You are RevolveAI Facilitator — concise and structured. When asked for JSON, return a single valid JSON object/array with no extra commentary.",
+              "You are RevolveAI Facilitator — concise and structured. When asked for JSON, return a single valid JSON object/array with no extra commentary."
           },
-          { role: "user", content: prompt },
-        ],
-      }),
+          { role: "user", content: prompt }
+        ]
+      })
     });
 
     if (!r.ok) {
+      // Bubble up readable upstream detail
       let detail;
       try {
         const j = await r.json();
