@@ -19,34 +19,41 @@ import { FRAMEWORKS } from '../constants';
 // --- Helper: call your serverless route that proxies to OpenAI ---
 // Add this helper near the top of openaiService.ts
 // 1) Cleaners at top of file
+// 1) Cleaners at top of file
 function cleanLLM(text: string): string {
   if (!text) return "";
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/```json/gi, "```")
-    .replace(/```/g, "")
-    .trim();
+  // remove hidden chains some models add
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // remove code fences
+  text = text.replace(/```json/gi, "```").replace(/```/g, "");
+  return text.trim();
 }
 
+// 2) Types and call function used everywhere inside this file
 type CallOpts = { json?: boolean; maxTokens?: number };
 
 async function callOpenAI(prompt: string, opts: CallOpts = {}): Promise<string> {
   const res = await fetch("/api/openai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, json: opts.json, maxTokens: opts.maxTokens }),
+    body: JSON.stringify({
+      prompt,
+      json: Boolean(opts.json),
+      maxTokens: typeof opts.maxTokens === "number" ? opts.maxTokens : undefined
+    }),
   });
 
   const data = await res.json().catch(() => ({}));
 
-  if (!res.ok || (data && data.error)) {
+  if (!res.ok || data?.error) {
     const reason = data?.detail || `HTTP ${res.status}`;
     console.error("LLM error:", reason);
-    throw new Error(reason);
+    throw new Error(reason); // surfaces upstream detail in your red banner
   }
 
   return cleanLLM(String(data?.text || ""));
 }
+
 /** Remove hidden <think>…</think> blocks and code fences the model might add */
 function stripNoisyWrappers(text: string): string {
   return text
